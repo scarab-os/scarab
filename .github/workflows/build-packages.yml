@@ -3,39 +3,51 @@ name: Build Packages
 on:
   push:
     branches: [main]
-    paths: ['ports/**']
+    paths: ['ports/**', 'scripts/build-package.sh']
   workflow_dispatch:
 
 env:
   TARGET: x86_64-scarab-linux-musl
-  ARCH: x86_64
   TOOLCHAIN_URL: https://github.com/scarab-os/toolchain/releases/download/latest/toolchain-x86_64.tar.zst
 
 jobs:
-  packages:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.scan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: scan
+        name: Discover ports
+        run: |
+          # Scan all ports, skip special ones (kernel, libc, bootloader, init)
+          SKIP="linux musl limine nitro"
+          
+          matrix="["
+          first=true
+          for portfile in ports/*/*/Portfile; do
+            cat=$(echo "$portfile" | cut -d/ -f2)
+            name=$(echo "$portfile" | cut -d/ -f3)
+            ver=$(grep "^version=" "$portfile" | cut -d= -f2)
+            
+            # Skip special packages
+            echo "$SKIP" | grep -qw "$name" && continue
+            
+            [ "$first" = true ] && first=false || matrix="$matrix,"
+            matrix="$matrix{\"name\":\"$name\",\"version\":\"$ver\",\"category\":\"$cat\"}"
+          done
+          matrix="$matrix]"
+          
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "Found $(echo "$matrix" | grep -o '"name"' | wc -l) packages"
+
+  build:
+    needs: discover
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        package:
-          - { name: busybox, version: "1.37.0", category: core }
-          - { name: zlib, version: "1.3.1", category: core }
-          - { name: mbedtls, version: "3.6.5", category: core }
-          - { name: curl, version: "8.18.0", category: core }
-          - { name: e2fsprogs, version: "1.47.3", category: core }
-          - { name: ncurses, version: "6.6", category: lib }
-          - { name: dropbear, version: "2025.89", category: net }
-          - { name: dhcpcd, version: "10.3.0", category: net }
-          - { name: iproute2, version: "6.18.0", category: net }
-          - { name: nano, version: "8.7", category: extra }
-          - { name: htop, version: "3.4.1", category: extra }
-          - { name: make, version: "4.4.1", category: devel }
-          - { name: bash, version: "5.2.37", category: devel }
-          - { name: bison, version: "3.8.2", category: devel }
-          - { name: flex, version: "2.6.4", category: devel }
-          - { name: ninja, version: "1.13.2", category: devel }
-          - { name: git, version: "2.53.0", category: devel }
-          - # cmake excluded - complex cross-build
+        package: ${{ fromJson(needs.discover.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -43,239 +55,24 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake meson ninja-build \
-            bc flex bison libelf-dev zstd
+            bc flex bison libelf-dev zstd pkg-config
 
       - name: Download toolchain
         run: |
           curl -fL "$TOOLCHAIN_URL" | zstd -d | tar xf -
-          export PATH="$PWD/toolchain/bin:$PATH"
-          ${TARGET}-gcc --version | head -1
+          echo "$PWD/toolchain/bin" >> $GITHUB_PATH
 
       - name: Build ${{ matrix.package.name }}
-        env:
-          PKG_NAME: ${{ matrix.package.name }}
-          PKG_VER: ${{ matrix.package.version }}
-          PKG_CAT: ${{ matrix.package.category }}
         run: |
-          set -e
-          export PATH="$PWD/toolchain/bin:$PATH"
+          chmod +x scripts/build-package.sh
+          
           export CROSS="${TARGET}"
           export SYSROOT="$PWD/toolchain/${TARGET}"
-          export CC="${CROSS}-gcc"
-          export CXX="${CROSS}-g++"
-          export AR="${CROSS}-ar"
-          export PKG="$PWD/pkg-output"
-          export SRC="$PWD/build-work"
-          export MAKEFLAGS="-j$(nproc)"
-          OLD_C="-std=gnu89 -Wno-error"
           
-          mkdir -p "$SRC" "$PKG"
-          
-          # Source Portfile for variables
-          . "$GITHUB_WORKSPACE/ports/${PKG_CAT}/${PKG_NAME}/Portfile"
-          
-          # Download
-          if [ -n "$source" ]; then
-            cd "$SRC"
-            SRCFILE="$(basename "$source")"
-            curl -fL -o "$SRCFILE" "$source"
-            case "$SRCFILE" in
-              *.tar.gz|*.tgz) tar xzf "$SRCFILE" ;;
-              *.tar.xz) tar xJf "$SRCFILE" ;;
-              *.tar.bz2) tar xjf "$SRCFILE" ;;
-            esac
-            cd "$GITHUB_WORKSPACE"
-          fi
-          
-          # Patches
-          PORTDIR="$GITHUB_WORKSPACE/ports/${PKG_CAT}/${PKG_NAME}"
-          if [ -d "$PORTDIR/patches" ]; then
-            for p in "$PORTDIR/patches"/*.patch; do
-              [ -f "$p" ] && patch -d "$SRC" -p1 < "$p"
-            done
-          fi
-          
-          cd "$SRC"
-          
-          case "$PKG_NAME" in
-            busybox)
-              cd busybox-${PKG_VER}
-              make defconfig
-              sed -i "s|.*CONFIG_CROSS_COMPILER_PREFIX.*|CONFIG_CROSS_COMPILER_PREFIX=\"${CROSS}-\"|" .config
-              sed -i 's|# CONFIG_STATIC is not set|CONFIG_STATIC=y|' .config
-              sed -i 's|CONFIG_TC=y|# CONFIG_TC is not set|' .config
-              yes "" | make oldconfig > /dev/null 2>&1
-              make -j$(nproc)
-              make CONFIG_PREFIX="$PKG" install
-              ;;
-            zlib)
-              cd zlib-${PKG_VER}
-              CFLAGS="-Wno-error" CC="${CC}" CHOST="$CROSS" ./configure --prefix=/usr --static
-              make -j$(nproc)
-              make DESTDIR="$PKG" install
-              ;;
-            mbedtls)
-              cd mbedtls-${PKG_VER}
-              mkdir bld && cd bld
-              cmake .. -DCMAKE_C_COMPILER="${CC}" -DCMAKE_INSTALL_PREFIX=/usr \
-                -DCMAKE_BUILD_TYPE=Release -DCMAKE_SYSTEM_NAME=Linux \
-                -DUSE_SHARED_MBEDTLS_LIBRARY=OFF -DUSE_STATIC_MBEDTLS_LIBRARY=ON \
-                -DENABLE_PROGRAMS=OFF -DENABLE_TESTING=OFF
-              make -j$(nproc) && make DESTDIR="$PKG" install
-              ;;
-            curl)
-              cd curl-${PKG_VER}
-              ./configure --host="$CROSS" --prefix=/usr --with-mbedtls \
-                --without-libpsl --disable-shared --enable-static --disable-ldap --disable-manual \
-                CFLAGS="-Os -I$SYSROOT/usr/include" LDFLAGS="-static -L$SYSROOT/usr/lib"
-              make -j$(nproc) && make DESTDIR="$PKG" install-strip
-              ;;
-            e2fsprogs)
-              cd e2fsprogs-${PKG_VER}
-              mkdir bld && cd bld
-              ../configure --host="$CROSS" --prefix=/usr --sbindir=/sbin --sysconfdir=/etc \
-                --disable-nls --disable-uuidd --disable-fsck --disable-debugfs CFLAGS="-Os"
-              make -j$(nproc) && make DESTDIR="$PKG" install
-              ;;
-            ncurses)
-              cd ncurses-${PKG_VER}
-              ./configure --host="$CROSS" --prefix=/usr --without-debug --without-shared \
-                --with-normal --enable-widec --without-cxx-binding --without-ada --disable-stripping
-              make -j$(nproc) && make DESTDIR="$PKG" install
-              # Install to sysroot too for nano/htop deps
-              make DESTDIR="$SYSROOT" install
-              ;;
-            dropbear)
-              cd dropbear-${PKG_VER}
-              ./configure --host="$CROSS" --prefix=/usr --sysconfdir=/etc/dropbear \
-                --disable-zlib CFLAGS="-Os" LDFLAGS="-static"
-              make PROGRAMS="dropbear dbclient dropbearkey scp" STATIC=1 -j$(nproc)
-              make PROGRAMS="dropbear dbclient dropbearkey scp" DESTDIR="$PKG" install
-              ;;
-            dhcpcd)
-              cd dhcpcd-${PKG_VER}
-              ./configure --host="$CROSS" --prefix=/usr --sbindir=/sbin --sysconfdir=/etc \
-                --libexecdir=/usr/lib/dhcpcd --runstatedir=/run CFLAGS="-Os"
-              make -j$(nproc) && make DESTDIR="$PKG" install
-              ;;
-            iproute2)
-              cd iproute2-${PKG_VER}
-              sed -i '1i #include <limits.h>' lib/utils_math.c
-              sed -i '/static.*setns/d' include/namespace.h
-              sed -i '1i #include <endian.h>' include/libnetlink.h
-              sed -i '1i #include <linux/limits.h>' ip/iplink.c
-              CC="${CC}" PKG_CONFIG=false ./configure
-              CONF_COLOR=$(grep "^CONF_COLOR" config.mk | cut -d= -f2)
-              make CC="${CC}" AR="${AR}" CFLAGS="-Os -D_GNU_SOURCE -I../include -DHAVE_SETNS -DCONF_COLOR=${CONF_COLOR} -DHAVE_HANDLE_AT" \
-                LDFLAGS="-static" SUBDIRS="lib ip bridge" -j$(nproc)
-              mkdir -p "$PKG/sbin"
-              cp ip/ip bridge/bridge "$PKG/sbin/"
-              ;;
-            nano)
-              cd nano-${PKG_VER}
-              ./configure --host="$CROSS" --prefix=/usr --sysconfdir=/etc --disable-nls \
-                CFLAGS="-Os -I$SYSROOT/usr/include -I$SYSROOT/usr/include/ncursesw" \
-                LDFLAGS="-static -L$SYSROOT/usr/lib" \
-                NCURSESW_CFLAGS="-I$SYSROOT/usr/include/ncursesw" \
-                NCURSESW_LIBS="-L$SYSROOT/usr/lib -lncursesw"
-              make -j$(nproc) && make DESTDIR="$PKG" install-strip
-              ;;
-            htop)
-              cd htop-${PKG_VER}
-              ./configure --host="$CROSS" --prefix=/usr --disable-unicode --enable-static \
-                CFLAGS="-Os -I$SYSROOT/usr/include -I$SYSROOT/usr/include/ncursesw" \
-                LDFLAGS="-static -L$SYSROOT/usr/lib" \
-                HTOP_NCURSESW_CFLAGS="-I$SYSROOT/usr/include/ncursesw" \
-                HTOP_NCURSESW_LIBS="-L$SYSROOT/usr/lib -lncursesw"
-              make -j$(nproc) && make DESTDIR="$PKG" install-strip
-              ;;
-            make)
-              cd make-${PKG_VER}
-              ./configure --host="$CROSS" --prefix=/usr --disable-nls --without-guile \
-                CFLAGS="-Os $OLD_C" LDFLAGS="-static"
-              sed -i 's|#define getenv.*||' glob/fnmatch.c 2>/dev/null || true
-              make -j$(nproc)
-              mkdir -p "$PKG/usr/bin" && cp make "$PKG/usr/bin/make"
-              ;;
-            bash)
-              cd bash-${PKG_VER}
-              ./configure --host="$CROSS" --prefix=/usr --without-bash-malloc --disable-nls --without-curses \
-                CFLAGS="-Os $OLD_C" LDFLAGS="-static" \
-                bash_cv_getcwd_malloc=yes bash_cv_func_sigsetjmp=present \
-                bash_cv_must_reinstall_sighandlers=no bash_cv_sys_named_pipes=present
-              make CC_FOR_BUILD="gcc" CFLAGS_FOR_BUILD="-O2 $OLD_C" -j$(nproc)
-              mkdir -p "$PKG/usr/bin" && cp bash "$PKG/usr/bin/bash"
-              ;;
-            bison)
-              cd bison-${PKG_VER}
-              ./configure --host="$CROSS" --prefix=/usr --disable-nls CFLAGS="-Os" LDFLAGS="-static"
-              make -j$(nproc) && make DESTDIR="$PKG" install-strip
-              ;;
-            flex)
-              cd flex-${PKG_VER}
-              flex -o src/scan.c src/scan.l 2>/dev/null || true
-              ./configure --host="$CROSS" --prefix=/usr --disable-nls \
-                CFLAGS="-Os $OLD_C" LDFLAGS="-static" ac_cv_func_reallocarray=yes
-              ${CC} $OLD_C -Os -static -DHAVE_CONFIG_H -I. -Isrc \
-                src/buf.c src/ccl.c src/dfa.c src/ecs.c src/filter.c src/gen.c \
-                src/main.c src/misc.c src/nfa.c src/options.c src/parse.c src/regex.c \
-                src/scan.c src/scanflags.c src/scanopt.c src/skel.c src/sym.c \
-                src/tables.c src/tables_shared.c src/tblcmp.c src/yylex.c -o flex -lm
-              mkdir -p "$PKG/usr/bin" && cp flex "$PKG/usr/bin/flex"
-              ln -sf flex "$PKG/usr/bin/lex"
-              ;;
-            ninja)
-              cd ninja-${PKG_VER}
-              cmake -B bld -DCMAKE_C_COMPILER="${CC}" -DCMAKE_CXX_COMPILER="${CXX}" \
-                -DCMAKE_SYSTEM_NAME=Linux -DCMAKE_INSTALL_PREFIX=/usr \
-                -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS="-static"
-              cmake --build bld -j$(nproc)
-              mkdir -p "$PKG/usr/bin" && cp bld/ninja "$PKG/usr/bin/ninja"
-              ;;
-            git)
-              cd git-${PKG_VER}
-              make CC="${CC}" AR="${AR}" prefix=/usr \
-                CFLAGS="-Os -I$SYSROOT/usr/include" LDFLAGS="-static -L$SYSROOT/usr/lib" \
-                NO_OPENSSL=1 NO_PYTHON=1 NO_PERL=1 NO_TCLTK=1 NO_GETTEXT=1 \
-                NO_CURL=1 NO_EXPAT=1 NO_REGEX=NeedsStartEnd NO_NSEC=1 NO_ICONV=1 -j$(nproc)
-              make CC="${CC}" AR="${AR}" prefix=/usr DESTDIR="$PKG" \
-                NO_OPENSSL=1 NO_PYTHON=1 NO_PERL=1 NO_TCLTK=1 NO_GETTEXT=1 \
-                NO_CURL=1 NO_EXPAT=1 NO_REGEX=NeedsStartEnd NO_NSEC=1 NO_ICONV=1 install
-              ;;
-            cmake)
-              cd cmake-${PKG_VER}
-              mkdir bld-host && cd bld-host
-              cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
-              make -j$(nproc)
-              HOST_CMAKE="$(pwd)/bin/cmake"
-              cd .. && mkdir bld-cross && cd bld-cross
-              cat > tc.cmake <<EOF
-          set(CMAKE_SYSTEM_NAME Linux)
-          set(CMAKE_C_COMPILER ${CC})
-          set(CMAKE_CXX_COMPILER ${CXX})
-          set(CMAKE_FIND_ROOT_PATH $SYSROOT)
-          set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
-          set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
-          set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
-          set(CMAKE_EXE_LINKER_FLAGS "-static")
-          EOF
-              $HOST_CMAKE .. -DCMAKE_TOOLCHAIN_FILE=tc.cmake \
-                -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_BUILD_TYPE=Release \
-                -DBUILD_TESTING=OFF -DCMAKE_USE_OPENSSL=OFF
-              make -j$(nproc) && make DESTDIR="$PKG" install
-              ;;
-            *) echo "::error::No recipe for $PKG_NAME"; exit 1 ;;
-          esac
-          
-          cd "$GITHUB_WORKSPACE"
-          TARBALL="${PKG_NAME}-${PKG_VER}-${ARCH}.tar.gz"
-          if [ "$(ls -A "$PKG" 2>/dev/null)" ]; then
-            cd "$PKG" && tar czf "$GITHUB_WORKSPACE/$TARBALL" . && cd "$GITHUB_WORKSPACE"
-            sha256sum "$TARBALL" > "${TARBALL}.sha256"
-            echo "✅ $TARBALL ($(du -h "$TARBALL" | cut -f1))"
-          else
-            echo "::error::Empty output for $PKG_NAME" && exit 1
-          fi
+          scripts/build-package.sh \
+            "${{ matrix.package.category }}" \
+            "${{ matrix.package.name }}" \
+            "$PWD"
 
       - name: Upload package
         uses: actions/upload-artifact@v4
@@ -286,7 +83,7 @@ jobs:
             *.sha256
 
   publish:
-    needs: packages
+    needs: build
     if: always() && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -303,8 +100,9 @@ jobs:
 
       - name: Generate repo.json
         run: |
-          python3 << 'PYEOF'
+          python3 << 'EOF'
           import json, os, glob
+          
           packages = []
           for d in sorted(glob.glob('artifacts/pkg-*/')):
               for tarball in glob.glob(os.path.join(d, '*.tar.gz')):
@@ -313,9 +111,11 @@ jobs:
                   base = filename.replace('-x86_64.tar.gz', '')
                   parts = base.rsplit('-', 1)
                   name, version = (parts[0], parts[1]) if len(parts) > 1 else (base, '?')
+                  
                   sha_file = tarball + '.sha256'
                   sha256 = open(sha_file).read().split()[0] if os.path.exists(sha_file) else ''
                   size = f'{os.path.getsize(tarball)/1024/1024:.1f}M'
+                  
                   category = desc = ''
                   deps = []
                   for cat in ['core','lib','devel','net','extra']:
@@ -328,11 +128,13 @@ jobs:
                                   d = line.split(':',1)[1].strip()
                                   if d: deps = d.split()
                           break
+                  
                   packages.append(dict(name=name, version=version, category=category,
                       description=desc, depends=deps, size=size, sha256=sha256, filename=filename))
+          
           with open('repo.json','w') as f: json.dump(packages, f, indent=2)
           print(f'{len(packages)} packages in repo.json')
-          PYEOF
+          EOF
           cat repo.json
 
       - name: Publish to packages repo
