@@ -4,7 +4,7 @@
 
 name=dropbear
 version=2025.89
-source=https://github.com/mkj/dropbear/releases/download/DROPBEAR_$version/dropbear-$version.tar.bz2
+source=https://matt.ucc.asn.au/dropbear/releases/dropbear-$version.tar.bz2
 
 build() {
     cd $name-$version
