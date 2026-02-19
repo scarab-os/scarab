@@ -8,17 +8,16 @@ source=https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-$version/mb
 
 build() {
     cd $name-$version
-
     mkdir build && cd build
     cmake .. \
+        -DCMAKE_C_COMPILER=$CC \
         -DCMAKE_INSTALL_PREFIX=/usr \
         -DCMAKE_BUILD_TYPE=Release \
-        -DUSE_SHARED_MBEDTLS_LIBRARY=ON \
-        -DUSE_STATIC_MBEDTLS_LIBRARY=OFF \
-        -DENABLE_ZLIB_SUPPORT=ON \
+        -DCMAKE_SYSTEM_NAME=Linux \
+        -DUSE_SHARED_MBEDTLS_LIBRARY=OFF \
+        -DUSE_STATIC_MBEDTLS_LIBRARY=ON \
         -DENABLE_PROGRAMS=OFF \
         -DENABLE_TESTING=OFF
-
     make -j$(nproc)
     make DESTDIR=$PKG install
 }

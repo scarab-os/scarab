@@ -8,12 +8,7 @@ source=https://ftp.gnu.org/gnu/readline/readline-$version.tar.gz
 
 build() {
     cd $name-$version
-
-    ./configure \
-        --prefix=/usr \
-        --disable-static \
-        --with-curses
-
-    make SHLIB_LIBS="-lncursesw" -j$(nproc)
-    make SHLIB_LIBS="-lncursesw" DESTDIR=$PKG install
+    ./configure --host=$CROSS --prefix=/usr --disable-static
+    make -j$(nproc)
+    make DESTDIR=$PKG install
 }

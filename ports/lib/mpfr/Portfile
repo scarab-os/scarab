@@ -8,12 +8,7 @@ source=https://ftp.gnu.org/gnu/mpfr/mpfr-$version.tar.xz
 
 build() {
     cd $name-$version
-
-    ./configure \
-        --prefix=/usr \
-        --disable-static \
-        --with-gmp=/usr
-
+    ./configure --host=$CROSS --prefix=/usr --disable-static
     make -j$(nproc)
     make DESTDIR=$PKG install
 }

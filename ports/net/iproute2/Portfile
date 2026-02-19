@@ -8,8 +8,15 @@ source=https://git.kernel.org/pub/scm/network/iproute2/iproute2.git/snapshot/ipr
 
 build() {
     cd $name-$version
-
-    ./configure --prefix=/usr
-    make -j$(nproc)
-    make DESTDIR=$PKG install
+    sed -i '1i #include <limits.h>' lib/utils_math.c
+    sed -i '/static.*setns/d' include/namespace.h
+    sed -i '1i #include <endian.h>' include/libnetlink.h
+    sed -i '1i #include <linux/limits.h>' ip/iplink.c
+    CC=$CC PKG_CONFIG=false ./configure
+    CONF_COLOR=$(grep "^CONF_COLOR" config.mk | cut -d= -f2)
+    make CC=$CC AR=$AR \
+        CFLAGS="-Os -D_GNU_SOURCE -I../include -DHAVE_SETNS -DCONF_COLOR=${CONF_COLOR} -DHAVE_HANDLE_AT" \
+        LDFLAGS="-static" SUBDIRS="lib ip bridge" -j$(nproc)
+    mkdir -p $PKG/sbin
+    cp ip/ip bridge/bridge $PKG/sbin/
 }

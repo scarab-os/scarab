@@ -8,23 +8,22 @@ source=https://ftp.gnu.org/gnu/gcc/gcc-$version/gcc-$version.tar.xz
 
 build() {
     cd $name-$version
-
     mkdir build && cd build
     ../configure \
+        --host=$CROSS \
+        --target=$CROSS \
         --prefix=/usr \
         --libdir=/usr/lib \
         --libexecdir=/usr/lib \
         --disable-multilib \
         --disable-nls \
+        --disable-bootstrap \
+        --disable-libsanitizer \
+        --enable-languages=c,c++ \
         --enable-default-pie \
         --enable-default-ssp \
-        --enable-languages=c,c++ \
         --with-system-zlib
-
     make -j$(nproc)
     make DESTDIR=$PKG install
-
-    # Symlinks
     ln -sf gcc $PKG/usr/bin/cc
-    ln -sf g++ $PKG/usr/bin/c++
 }

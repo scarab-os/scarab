@@ -8,16 +8,17 @@ source=https://github.com/vim/vim/archive/refs/tags/v$version.0014.tar.gz
 
 build() {
     cd $name-$version.0014
-
-    ./configure \
-        --prefix=/usr \
-        --with-tlib=ncursesw \
-        --disable-gui \
-        --without-x \
-        --disable-nls
-
+    vim_cv_toupper_strstrures=yes \
+    vim_cv_terminfo=yes \
+    vim_cv_tgetent=zero \
+    vim_cv_getcwd_strstrures=yes \
+    vim_cv_stat_ignores_slash=yes \
+    vim_cv_memmove_handles_overlap=yes \
+    ./configure --host=$CROSS --prefix=/usr \
+        --with-tlib=ncursesw --disable-gui --without-x --disable-nls \
+        CFLAGS="-Os -I$SYSROOT/usr/include/ncursesw" \
+        LDFLAGS="-static -L$SYSROOT/usr/lib"
     make -j$(nproc)
     make DESTDIR=$PKG install
-
     ln -sf vim $PKG/usr/bin/vi
 }

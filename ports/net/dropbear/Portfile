@@ -8,12 +8,8 @@ source=https://matt.ucc.asn.au/dropbear/releases/dropbear-$version.tar.bz2
 
 build() {
     cd $name-$version
-
-    ./configure \
-        --prefix=/usr \
-        --sysconfdir=/etc/dropbear \
-        --disable-zlib
-
-    make PROGRAMS="dropbear dbclient dropbearkey scp" -j$(nproc)
+    ./configure --host=$CROSS --prefix=/usr --sysconfdir=/etc/dropbear \
+        --disable-zlib CFLAGS="-Os" LDFLAGS="-static"
+    make PROGRAMS="dropbear dbclient dropbearkey scp" STATIC=1 -j$(nproc)
     make PROGRAMS="dropbear dbclient dropbearkey scp" DESTDIR=$PKG install
 }

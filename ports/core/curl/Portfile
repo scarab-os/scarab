@@ -8,15 +8,17 @@ source=https://curl.se/download/curl-$version.tar.xz
 
 build() {
     cd $name-$version
-
     ./configure \
+        --host=$CROSS \
         --prefix=/usr \
         --with-mbedtls \
-        --without-ssl \
-        --disable-static \
-        --enable-threaded-resolver \
-        --disable-ldap
-
+        --without-libpsl \
+        --disable-shared \
+        --enable-static \
+        --disable-ldap \
+        --disable-manual \
+        CFLAGS="-Os -I$SYSROOT/usr/include" \
+        LDFLAGS="-static -L$SYSROOT/usr/lib"
     make -j$(nproc)
-    make DESTDIR=$PKG install
+    make DESTDIR=$PKG install-strip
 }

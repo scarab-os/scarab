@@ -8,12 +8,11 @@ source=https://www.nano-editor.org/dist/v8/nano-$version.tar.xz
 
 build() {
     cd $name-$version
-
-    ./configure \
-        --prefix=/usr \
-        --sysconfdir=/etc \
-        --disable-nls
-
+    ./configure --host=$CROSS --prefix=/usr --sysconfdir=/etc --disable-nls \
+        CFLAGS="-Os -I$SYSROOT/usr/include -I$SYSROOT/usr/include/ncursesw" \
+        LDFLAGS="-static -L$SYSROOT/usr/lib" \
+        NCURSESW_CFLAGS="-I$SYSROOT/usr/include/ncursesw" \
+        NCURSESW_LIBS="-L$SYSROOT/usr/lib -lncursesw"
     make -j$(nproc)
-    make DESTDIR=$PKG install
+    make DESTDIR=$PKG install-strip
 }

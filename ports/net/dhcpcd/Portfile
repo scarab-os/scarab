@@ -8,14 +8,8 @@ source=https://github.com/NetworkConfiguration/dhcpcd/releases/download/v$versio
 
 build() {
     cd $name-$version
-
-    ./configure \
-        --prefix=/usr \
-        --sbindir=/sbin \
-        --sysconfdir=/etc \
-        --libexecdir=/usr/lib/dhcpcd \
-        --runstatedir=/run
-
+    ./configure --host=$CROSS --prefix=/usr --sbindir=/sbin \
+        --sysconfdir=/etc --libexecdir=/usr/lib/dhcpcd --runstatedir=/run CFLAGS="-Os"
     make -j$(nproc)
     make DESTDIR=$PKG install
 }

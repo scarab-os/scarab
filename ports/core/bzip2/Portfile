@@ -8,14 +8,6 @@ source=https://sourceware.org/pub/bzip2/bzip2-$version.tar.gz
 
 build() {
     cd $name-$version
-
-    make -f Makefile-libbz2_so
-    make clean
-    make -j$(nproc)
+    make CC=$CC AR=$AR RANLIB=$RANLIB -j$(nproc)
     make PREFIX=$PKG/usr install
-
-    # Shared library
-    mkdir -p $PKG/usr/lib
-    cp -a libbz2.so* $PKG/usr/lib/
-    ln -sf libbz2.so.$version $PKG/usr/lib/libbz2.so
 }

@@ -8,18 +8,11 @@ source=https://busybox.net/downloads/busybox-$version.tar.bz2
 
 build() {
     cd $name-$version
-
-    if [ -f "$SCARAB_PORTS/core/busybox/files/config" ]; then
-        cp "$SCARAB_PORTS/core/busybox/files/config" .config
-    else
-        make defconfig
-    fi
-
-    # Static build
-    sed -i 's/# CONFIG_STATIC is not set/CONFIG_STATIC=y/' .config
-
+    make defconfig
+    sed -i "s|.*CONFIG_CROSS_COMPILER_PREFIX.*|CONFIG_CROSS_COMPILER_PREFIX=\"${CROSS}-\"|" .config
+    sed -i 's|# CONFIG_STATIC is not set|CONFIG_STATIC=y|' .config
+    sed -i 's|CONFIG_TC=y|# CONFIG_TC is not set|' .config
+    yes "" | make oldconfig > /dev/null 2>&1
     make -j$(nproc)
-
-    mkdir -p $PKG/bin $PKG/sbin $PKG/usr/bin $PKG/usr/sbin
     make CONFIG_PREFIX=$PKG install
 }

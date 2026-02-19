@@ -8,13 +8,44 @@ source=https://github.com/pkgconf/pkgconf/archive/refs/tags/pkgconf-$version.tar
 
 build() {
     cd $name-$name-$version
-
-    meson setup build \
-        --prefix=/usr \
-        -Dbuildtype=release
-
-    ninja -C build
-    DESTDIR=$PKG ninja -C build install
-
+    # pkgconf uses meson but we can build with autotools
+    [ -f configure ] || {
+        cat > configure <<'CONF'
+#!/bin/sh
+echo "Skipping configure for pkgconf"
+CONF
+        chmod +x configure
+    }
+    $CC -Os -static -I. -Icli -Ilibpkgconf \
+        cli/main.c cli/getopt_long.c \
+        libpkgconf/audit.c libpkgconf/bsdstubs.c libpkgconf/cache.c \
+        libpkgconf/client.c libpkgconf/dependency.c libpkgconf/fileio.c \
+        libpkgconf/fragment.c libpkgconf/parser.c libpkgconf/path.c \
+        libpkgconf/personality.c libpkgconf/pkg.c libpkgconf/queue.c \
+        libpkgconf/tuple.c libpkgconf/argvsplit.c \
+        -DPKGCONF_VERSION=\"$version\" \
+        -DSYSTEM_LIBDIR=\"/usr/lib\" \
+        -DSYSTEM_INCLUDEDIR=\"/usr/include\" \
+        -DPKG_DEFAULT_PATH=\"/usr/lib/pkgconfig:/usr/share/pkgconfig\" \
+        -o pkgconf 2>/dev/null || {
+        # Fallback: use meson with cross file
+        cat > cross.txt <<MEOF
+[binaries]
+c = '$CC'
+ar = '$AR'
+strip = '$STRIP'
+[host_machine]
+system = 'linux'
+cpu_family = 'x86_64'
+cpu = 'x86_64'
+endian = 'little'
+MEOF
+        meson setup build --cross-file cross.txt --prefix=/usr
+        ninja -C build
+        DESTDIR=$PKG ninja -C build install
+        return
+    }
+    mkdir -p $PKG/usr/bin
+    cp pkgconf $PKG/usr/bin/pkgconf
     ln -sf pkgconf $PKG/usr/bin/pkg-config
 }

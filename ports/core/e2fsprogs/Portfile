@@ -8,14 +8,15 @@ source=https://github.com/tytso/e2fsprogs/archive/refs/tags/v$version.tar.gz
 
 build() {
     cd $name-$version
-
     mkdir build && cd build
     ../configure \
+        --host=$CROSS \
         --prefix=/usr \
         --sbindir=/sbin \
         --sysconfdir=/etc \
-        --disable-nls
-
+        --disable-nls \
+        --disable-uuidd \
+        CFLAGS="-Os"
     make -j$(nproc)
     make DESTDIR=$PKG install
 }

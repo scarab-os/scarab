@@ -8,11 +8,7 @@ source=https://ftp.gnu.org/gnu/mpc/mpc-$version.tar.gz
 
 build() {
     cd $name-$version
-
-    ./configure \
-        --prefix=/usr \
-        --disable-static
-
+    ./configure --host=$CROSS --prefix=/usr --disable-static
     make -j$(nproc)
     make DESTDIR=$PKG install
 }

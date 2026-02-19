@@ -8,12 +8,11 @@ source=https://github.com/tukaani-project/xz/releases/download/v$version/xz-$ver
 
 build() {
     cd $name-$version
-
     ./configure \
+        --host=$CROSS \
         --prefix=/usr \
         --disable-static \
         --disable-nls
-
     make -j$(nproc)
     make DESTDIR=$PKG install
 }

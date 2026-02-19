@@ -8,8 +8,7 @@ source=https://zlib.net/fossils/zlib-$version.tar.gz
 
 build() {
     cd $name-$version
-
-    ./configure --prefix=/usr
+    CFLAGS="-Wno-error" CC=$CC CHOST=$CROSS ./configure --prefix=/usr --static
     make -j$(nproc)
     make DESTDIR=$PKG install
 }

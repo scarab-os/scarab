@@ -8,11 +8,11 @@ source=https://github.com/htop-dev/htop/releases/download/$version/htop-$version
 
 build() {
     cd $name-$version
-
-    ./configure \
-        --prefix=/usr \
-        --disable-unicode
-
+    ./configure --host=$CROSS --prefix=/usr --disable-unicode --enable-static \
+        CFLAGS="-Os -I$SYSROOT/usr/include -I$SYSROOT/usr/include/ncursesw" \
+        LDFLAGS="-static -L$SYSROOT/usr/lib" \
+        HTOP_NCURSESW_CFLAGS="-I$SYSROOT/usr/include/ncursesw" \
+        HTOP_NCURSESW_LIBS="-L$SYSROOT/usr/lib -lncursesw"
     make -j$(nproc)
-    make DESTDIR=$PKG install
+    make DESTDIR=$PKG install-strip
 }

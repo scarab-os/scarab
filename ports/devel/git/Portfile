@@ -8,21 +8,13 @@ source=https://github.com/git/git/archive/refs/tags/v$version.tar.gz
 
 build() {
     cd $name-$version
-
-    make prefix=/usr \
-        NO_OPENSSL=1 \
-        NO_PYTHON=1 \
-        NO_PERL=1 \
-        NO_TCLTK=1 \
-        NO_GETTEXT=1 \
-        CURL_LDFLAGS="-lcurl" \
+    make CC=$CC AR=$AR prefix=/usr \
+        CFLAGS="-Os -I$SYSROOT/usr/include" LDFLAGS="-static -L$SYSROOT/usr/lib" \
+        NO_OPENSSL=1 NO_PYTHON=1 NO_PERL=1 NO_TCLTK=1 NO_GETTEXT=1 \
+        NO_CURL=1 NO_EXPAT=1 NO_REGEX=NeedsStartEnd NO_NSEC=1 NO_ICONV=1 \
         -j$(nproc)
-
-    make prefix=/usr \
-        NO_OPENSSL=1 \
-        NO_PYTHON=1 \
-        NO_PERL=1 \
-        NO_TCLTK=1 \
-        NO_GETTEXT=1 \
-        DESTDIR=$PKG install
+    make CC=$CC AR=$AR prefix=/usr DESTDIR=$PKG \
+        NO_OPENSSL=1 NO_PYTHON=1 NO_PERL=1 NO_TCLTK=1 NO_GETTEXT=1 \
+        NO_CURL=1 NO_EXPAT=1 NO_REGEX=NeedsStartEnd NO_NSEC=1 NO_ICONV=1 \
+        install
 }
