@@ -82,7 +82,7 @@ cd "$SRCDIR/gcc-$GCC_VER"
 msg "Installing Linux headers..."
 cd "$SRCDIR/linux-$LINUX_VER"
 make ARCH=x86_64 INSTALL_HDR_PATH="$SYSROOT/usr" headers_install \
-    > "$LOGDIR/linux-headers.log" 2>&1
+    > "$LOGDIR/linux-headers.log" 2>&1 || { echo "FAILED - see log:"; tail -30 "$LOGDIR/linux-headers.log"; exit 1; }
 msg "Linux headers OK"
 
 # === Step 2: Binutils ===
@@ -95,9 +95,9 @@ mkdir -p "$BUILDDIR/binutils-build" && cd "$BUILDDIR/binutils-build"
     --with-sysroot="$SYSROOT" \
     --disable-nls \
     --disable-werror \
-    > "$LOGDIR/binutils-configure.log" 2>&1
-make -j$JOBS > "$LOGDIR/binutils-make.log" 2>&1
-make install > "$LOGDIR/binutils-install.log" 2>&1
+    > "$LOGDIR/binutils-configure.log" 2>&1 || { cat "$LOGDIR/binutils-configure.log" | tail -20; exit 1; }
+make -j$JOBS > "$LOGDIR/binutils-make.log" 2>&1 || { echo "FAILED - see log:"; tail -30 "$LOGDIR/binutils-make.log"; exit 1; }
+make install > "$LOGDIR/binutils-install.log" 2>&1 || { echo "FAILED - see log:"; tail -30 "$LOGDIR/binutils-install.log"; exit 1; }
 msg "Binutils OK"
 
 # === Step 3: GCC Stage 1 (C only, freestanding) ===
@@ -120,11 +120,11 @@ mkdir -p "$BUILDDIR/gcc-build-stage1" && cd "$BUILDDIR/gcc-build-stage1"
     --disable-libstdcxx \
     --without-headers \
     --with-newlib \
-    > "$LOGDIR/gcc-stage1-configure.log" 2>&1
-make -j$JOBS all-gcc > "$LOGDIR/gcc-stage1-make.log" 2>&1
-make install-gcc > "$LOGDIR/gcc-stage1-install.log" 2>&1
-make -j$JOBS all-target-libgcc > "$LOGDIR/gcc-stage1-libgcc.log" 2>&1
-make install-target-libgcc > "$LOGDIR/gcc-stage1-libgcc-install.log" 2>&1
+    > "$LOGDIR/gcc-stage1-configure.log" 2>&1 || { echo "FAILED - see log:"; tail -30 "$LOGDIR/gcc-stage1-configure.log"; exit 1; }
+make -j$JOBS all-gcc > "$LOGDIR/gcc-stage1-make.log" 2>&1 || { echo "FAILED - see log:"; tail -30 "$LOGDIR/gcc-stage1-make.log"; exit 1; }
+make install-gcc > "$LOGDIR/gcc-stage1-install.log" 2>&1 || { echo "FAILED - see log:"; tail -30 "$LOGDIR/gcc-stage1-install.log"; exit 1; }
+make -j$JOBS all-target-libgcc > "$LOGDIR/gcc-stage1-libgcc.log" 2>&1 || { echo "FAILED - see log:"; tail -30 "$LOGDIR/gcc-stage1-libgcc.log"; exit 1; }
+make install-target-libgcc > "$LOGDIR/gcc-stage1-libgcc-install.log" 2>&1 || { echo "FAILED - see log:"; tail -30 "$LOGDIR/gcc-stage1-libgcc-install.log"; exit 1; }
 msg "GCC stage 1 OK"
 
 # === Step 4: musl ===
@@ -136,13 +136,17 @@ mkdir -p "$BUILDDIR/musl-build" && cd "$BUILDDIR/musl-build"
     --host="$TARGET" \
     --syslibdir=/lib \
     CROSS_COMPILE="$TARGET-" \
-    > "$LOGDIR/musl-configure.log" 2>&1
-make -j$JOBS > "$LOGDIR/musl-make.log" 2>&1
-make DESTDIR="$SYSROOT" install > "$LOGDIR/musl-install.log" 2>&1
+    > "$LOGDIR/musl-configure.log" 2>&1 || { echo "FAILED - see log:"; tail -30 "$LOGDIR/musl-configure.log"; exit 1; }
+make -j$JOBS > "$LOGDIR/musl-make.log" 2>&1 || { echo "FAILED - see log:"; tail -30 "$LOGDIR/musl-make.log"; exit 1; }
+make DESTDIR="$SYSROOT" install > "$LOGDIR/musl-install.log" 2>&1 || { echo "FAILED - see log:"; tail -30 "$LOGDIR/musl-install.log"; exit 1; }
 
-# GCC expects the dynamic linker here
-mkdir -p "$SYSROOT/usr/lib"
-ln -sf /lib/ld-musl-x86_64.so.1 "$SYSROOT/usr/lib/libc.so" 2>/dev/null || true
+# Fix: ld-musl symlink points to absolute /usr/lib/libc.so which doesn't exist in sysroot
+# Copy the actual shared lib and create proper linker script
+rm -f "$SYSROOT/lib/ld-musl-x86_64.so.1"
+cp "$SYSROOT/usr/lib/libc.so" "$SYSROOT/lib/ld-musl-x86_64.so.1"
+cat > "$SYSROOT/usr/lib/libc.so" <<LDSCRIPT
+GROUP ( /lib/ld-musl-x86_64.so.1 libc.a )
+LDSCRIPT
 msg "musl OK"
 
 # === Step 5: GCC Stage 2 (full C/C++) ===
@@ -164,9 +168,9 @@ mkdir -p "$BUILDDIR/gcc-build-stage2" && cd "$BUILDDIR/gcc-build-stage2"
     --enable-default-ssp \
     --disable-libsanitizer \
     --disable-fixincludes \
-    > "$LOGDIR/gcc-stage2-configure.log" 2>&1
-make -j$JOBS > "$LOGDIR/gcc-stage2-make.log" 2>&1
-make install > "$LOGDIR/gcc-stage2-install.log" 2>&1
+    > "$LOGDIR/gcc-stage2-configure.log" 2>&1 || { echo "FAILED - see log:"; tail -30 "$LOGDIR/gcc-stage2-configure.log"; exit 1; }
+make -j$JOBS > "$LOGDIR/gcc-stage2-make.log" 2>&1 || { echo "FAILED - see log:"; tail -30 "$LOGDIR/gcc-stage2-make.log"; exit 1; }
+make install > "$LOGDIR/gcc-stage2-install.log" 2>&1 || { echo "FAILED - see log:"; tail -30 "$LOGDIR/gcc-stage2-install.log"; exit 1; }
 msg "GCC stage 2 OK"
 
 # === Done ===
