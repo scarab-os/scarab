@@ -1,5 +1,7 @@
 # Build artifacts
 rootfs/
+rootfs-dev-backup/
+toolchain/
 toolchain-build/
 iso-build/
 *.iso
@@ -10,8 +12,3 @@ iso-build/
 # Editor
 *.swp
 *~
-toolchain-build/
-toolchain/
-toolchain-build/
-toolchain/
-rootfs-dev-backup/
