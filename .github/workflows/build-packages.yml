@@ -72,7 +72,7 @@ jobs:
           mkdir -p "$SRC" "$PKG"
           
           # Source Portfile for variables
-          . "ports/${PKG_CAT}/${PKG_NAME}/Portfile"
+          . "$GITHUB_WORKSPACE/ports/${PKG_CAT}/${PKG_NAME}/Portfile"
           
           # Download
           if [ -n "$source" ]; then
@@ -88,7 +88,7 @@ jobs:
           fi
           
           # Patches
-          PORTDIR="ports/${PKG_CAT}/${PKG_NAME}"
+          PORTDIR="$GITHUB_WORKSPACE/ports/${PKG_CAT}/${PKG_NAME}"
           if [ -d "$PORTDIR/patches" ]; then
             for p in "$PORTDIR/patches"/*.patch; do
               [ -f "$p" ] && patch -d "$SRC" -p1 < "$p"
