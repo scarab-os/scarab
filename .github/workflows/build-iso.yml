@@ -1,0 +1,153 @@
+name: Build ISO
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  iso:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential bison flex texinfo \
+            libgmp-dev libmpfr-dev libmpc-dev xorriso mtools bc \
+            libelf-dev nasm curl cpio gzip qemu-system-x86
+
+      - name: Cache toolchain
+        id: cache-toolchain
+        uses: actions/cache@v4
+        with:
+          path: toolchain
+          key: toolchain-musl-${{ hashFiles('scripts/build-toolchain.sh') }}
+
+      - name: Build toolchain
+        if: steps.cache-toolchain.outputs.cache-hit != 'true'
+        run: bash scripts/build-toolchain.sh ./toolchain
+
+      - name: Build BusyBox
+        run: |
+          export PATH="$PWD/toolchain/bin:$PATH"
+          CROSS=x86_64-scarab-linux-musl
+          
+          curl -fL https://busybox.net/downloads/busybox-1.37.0.tar.bz2 | tar xj
+          cd busybox-1.37.0
+          make defconfig
+          sed -i "s|.*CONFIG_CROSS_COMPILER_PREFIX.*|CONFIG_CROSS_COMPILER_PREFIX=\"${CROSS}-\"|" .config
+          sed -i 's|# CONFIG_STATIC is not set|CONFIG_STATIC=y|' .config
+          sed -i 's|CONFIG_TC=y|# CONFIG_TC is not set|' .config
+          yes "" | make oldconfig > /dev/null 2>&1
+          make -j$(nproc)
+
+      - name: Build Nitro
+        run: |
+          export PATH="$PWD/toolchain/bin:$PATH"
+          curl -fL "https://git.vuxu.org/nitro/snapshot/nitro-master.tar.gz" | tar xz
+          cd nitro-master
+          make CC="x86_64-scarab-linux-musl-gcc" CFLAGS="-Os -static" LDFLAGS="-static"
+
+      - name: Build kernel
+        run: |
+          export PATH="$PWD/toolchain/bin:$PATH"
+          CROSS=x86_64-scarab-linux-musl
+          
+          curl -fL "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.12.73.tar.xz" | tar xJ
+          cd linux-6.12.73
+          make ARCH=x86_64 CROSS_COMPILE=${CROSS}- defconfig
+          scripts/config --enable CONFIG_BLK_DEV_INITRD
+          scripts/config --enable CONFIG_RD_GZIP
+          scripts/config --enable CONFIG_DEVTMPFS
+          scripts/config --enable CONFIG_DEVTMPFS_MOUNT
+          scripts/config --enable CONFIG_TMPFS
+          make ARCH=x86_64 CROSS_COMPILE=${CROSS}- olddefconfig
+          make ARCH=x86_64 CROSS_COMPILE=${CROSS}- -j$(nproc)
+
+      - name: Build rootfs
+        run: |
+          bash scripts/build-rootfs.sh ./rootfs
+          
+          # Install BusyBox
+          cd busybox-1.37.0
+          make CONFIG_PREFIX=../rootfs install
+          cd ..
+          
+          # Install Nitro
+          cp nitro-master/nitro rootfs/sbin/init
+          cp nitro-master/nitroctl rootfs/usr/bin/nitroctl
+          
+          # Install kernel
+          mkdir -p rootfs/boot
+          cp linux-6.12.73/arch/x86/boot/bzImage rootfs/boot/vmlinuz-6.12.73
+          
+          # Install musl runtime
+          cp toolchain/x86_64-scarab-linux-musl/lib/ld-musl-x86_64.so.1 rootfs/lib/
+          
+          # Create /init
+          cat > rootfs/init <<'INIT'
+          #!/bin/sh
+          exec /sbin/init /etc/nitro
+          INIT
+          chmod +x rootfs/init
+
+      - name: Get Limine
+        run: |
+          git clone --depth=1 -b v10.x-binary https://github.com/limine-bootloader/limine.git limine-bin
+          cd limine-bin && make
+
+      - name: Build ISO
+        run: |
+          ROOTFS=./rootfs
+          ISODIR=./iso-build
+          OUTPUT=scarab-0.1.0-x86_64.iso
+          
+          mkdir -p "$ISODIR/boot/limine" "$ISODIR/EFI/BOOT"
+          
+          # Kernel + initramfs
+          cp "$ROOTFS/boot/vmlinuz-6.12.73" "$ISODIR/boot/vmlinuz"
+          cd "$ROOTFS" && find . | cpio -H newc -o | gzip -9 > "../$ISODIR/boot/initramfs.gz" && cd ..
+          
+          # Limine
+          cp limine-bin/limine-bios.sys "$ISODIR/boot/limine/"
+          cp limine-bin/limine-bios-cd.bin "$ISODIR/boot/limine/"
+          cp limine-bin/limine-uefi-cd.bin "$ISODIR/boot/limine/"
+          cp limine-bin/BOOTX64.EFI "$ISODIR/EFI/BOOT/"
+          
+          cat > "$ISODIR/boot/limine/limine.conf" <<'EOF'
+          timeout: 5
+          
+          /Scarab OS 0.1.0
+              protocol: linux
+              kernel_path: boot():/boot/vmlinuz
+              module_path: boot():/boot/initramfs.gz
+              kernel_cmdline: rw console=ttyS0 console=tty0
+          EOF
+          
+          xorriso -as mkisofs -o "$OUTPUT" \
+            -b boot/limine/limine-bios-cd.bin -no-emul-boot -boot-load-size 4 -boot-info-table \
+            --efi-boot boot/limine/limine-uefi-cd.bin -efi-boot-part --efi-boot-image \
+            --protective-msdos-label "$ISODIR"
+          
+          limine-bin/limine bios-install "$OUTPUT"
+          ls -lh "$OUTPUT"
+
+      - name: Test boot (QEMU)
+        run: |
+          timeout 15 qemu-system-x86_64 \
+            -kernel iso-build/boot/vmlinuz \
+            -initrd iso-build/boot/initramfs.gz \
+            -append "rw console=ttyS0" \
+            -m 256M -nographic -no-reboot \
+            2>&1 | tail -10 || true
+
+      - name: Release ISO
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: scarab-*.iso
+          generate_release_notes: true
