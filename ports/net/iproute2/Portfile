@@ -3,7 +3,7 @@
 # Depends:
 
 name=iproute2
-version=6.18.0
+version=6.12.0
 source=https://git.kernel.org/pub/scm/network/iproute2/iproute2.git/snapshot/iproute2-$version.tar.gz
 
 build() {

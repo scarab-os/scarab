@@ -8,7 +8,8 @@ source=https://ftp.gnu.org/gnu/gmp/gmp-$version.tar.xz
 
 build() {
     cd $name-$version
-    ./configure --host=$CROSS --prefix=/usr --enable-cxx --disable-static
+    ./configure --host=$CROSS --build=$(gcc -dumpmachine) \
+        --prefix=/usr --disable-static --disable-assembly
     make -j$(nproc)
     make DESTDIR=$PKG install
 }

@@ -8,6 +8,11 @@ source=https://sourceware.org/pub/bzip2/bzip2-$version.tar.gz
 
 build() {
     cd $name-$version
-    make CC=$CC AR=$AR RANLIB=$RANLIB -j$(nproc)
-    make PREFIX=$PKG/usr install
+    make CC=$CC AR=$AR RANLIB=$RANLIB CFLAGS="-Os" -j$(nproc) bzip2 bzip2recover
+    mkdir -p $PKG/usr/bin $PKG/usr/lib $PKG/usr/include
+    cp bzip2 bzip2recover $PKG/usr/bin/
+    cp libbz2.a $PKG/usr/lib/
+    cp bzlib.h $PKG/usr/include/
+    ln -sf bzip2 $PKG/usr/bin/bunzip2
+    ln -sf bzip2 $PKG/usr/bin/bzcat
 }

@@ -7,21 +7,24 @@ version=3.6a
 source=https://github.com/tmux/tmux/releases/download/$version/tmux-$version.tar.gz
 
 build() {
-    # tmux needs libevent - build it first
-    LIBEVENT_VER=2.1.12-stable
-    curl -fL -o libevent.tar.gz "https://github.com/libevent/libevent/releases/download/release-$LIBEVENT_VER/libevent-$LIBEVENT_VER.tar.gz"
+    # Build libevent first
+    curl -fL -o libevent.tar.gz \
+        "https://github.com/libevent/libevent/releases/download/release-2.1.12-stable/libevent-2.1.12-stable.tar.gz"
     tar xzf libevent.tar.gz
-    cd libevent-$LIBEVENT_VER
-    ./configure --host=$CROSS --prefix=$SRC/libevent-install --disable-shared --disable-openssl
+    cd libevent-2.1.12-stable
+    ./configure --host=$CROSS --prefix=$SRC/libevent-out \
+        --disable-shared --disable-openssl --disable-samples
     make -j$(nproc) && make install
     cd ..
-    
+
     cd $name-$version
+    PKG_CONFIG_PATH="" \
     ./configure --host=$CROSS --prefix=/usr \
-        CFLAGS="-Os -I$SRC/libevent-install/include -I$SYSROOT/usr/include/ncursesw" \
-        LDFLAGS="-static -L$SRC/libevent-install/lib -L$SYSROOT/usr/lib" \
-        LIBEVENT_CFLAGS="-I$SRC/libevent-install/include" \
-        LIBEVENT_LIBS="-L$SRC/libevent-install/lib -levent"
+        --enable-static \
+        CFLAGS="-Os -I$SRC/libevent-out/include -I$SYSROOT/usr/include/ncursesw -I$SYSROOT/usr/include" \
+        LDFLAGS="-static -L$SRC/libevent-out/lib -L$SYSROOT/usr/lib" \
+        LIBEVENT_CFLAGS="-I$SRC/libevent-out/include" \
+        LIBEVENT_LIBS="-L$SRC/libevent-out/lib -levent_core -lpthread"
     make -j$(nproc)
     make DESTDIR=$PKG install
 }

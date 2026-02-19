@@ -10,7 +10,7 @@ build() {
     cd $name-$version
     ./configure --host=$CROSS --prefix=/usr --without-ssl --without-libpsl \
         --disable-nls --disable-pcre --disable-iri \
-        CFLAGS="-Os" LDFLAGS="-static"
+        CFLAGS="-Os -std=gnu89 -Wno-error" LDFLAGS="-static"
     make -j$(nproc)
     make DESTDIR=$PKG install-strip
 }
