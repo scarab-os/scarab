@@ -1,0 +1,22 @@
+# Description: Fast lexical analyzer generator
+# URL: https://github.com/westes/flex
+# Depends:
+
+name=flex
+version=2.6.4
+source=https://github.com/westes/flex/releases/download/v$version/flex-$version.tar.gz
+
+build() {
+    cd $name-$version
+    flex -o src/scan.c src/scan.l 2>/dev/null || true
+    ./configure --host=$CROSS --prefix=/usr --disable-nls \
+        CFLAGS="-Os -std=gnu89 -Wno-error" LDFLAGS="-static" ac_cv_func_reallocarray=yes
+    ${CROSS}-gcc -std=gnu89 -Os -static -DHAVE_CONFIG_H -I. -Isrc \
+        src/buf.c src/ccl.c src/dfa.c src/ecs.c src/filter.c src/gen.c \
+        src/main.c src/misc.c src/nfa.c src/options.c src/parse.c src/regex.c \
+        src/scan.c src/scanflags.c src/scanopt.c src/skel.c src/sym.c \
+        src/tables.c src/tables_shared.c src/tblcmp.c src/yylex.c -o flex -lm
+    mkdir -p $PKG/usr/bin
+    cp flex $PKG/usr/bin/flex
+    ln -sf flex $PKG/usr/bin/lex
+}
