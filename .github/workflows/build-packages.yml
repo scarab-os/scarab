@@ -14,30 +14,17 @@ on:
 env:
   TARGET: x86_64-scarab-linux-musl
   ARCH: x86_64
+  TOOLCHAIN_URL: https://github.com/scarab-os/toolchain/releases/download/latest/toolchain-x86_64.tar.zst
 
 jobs:
   toolchain:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install build dependencies
+      - name: Download prebuilt toolchain
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential bison flex texinfo \
-            libgmp-dev libmpfr-dev libmpc-dev xorriso mtools bc \
-            libelf-dev nasm curl
-
-      - name: Cache toolchain
-        id: cache-toolchain
-        uses: actions/cache@v4
-        with:
-          path: toolchain
-          key: toolchain-musl-${{ hashFiles('scripts/build-toolchain.sh') }}
-
-      - name: Build toolchain
-        if: steps.cache-toolchain.outputs.cache-hit != 'true'
-        run: bash scripts/build-toolchain.sh ./toolchain
+          curl -fL "$TOOLCHAIN_URL" | zstd -d | tar xf -
+          echo "Toolchain downloaded"
+          ls toolchain/bin/${TARGET}-gcc
 
       - name: Test toolchain
         run: |
@@ -51,7 +38,7 @@ jobs:
         with:
           name: toolchain
           path: toolchain
-          retention-days: 7
+          retention-days: 1
 
   packages:
     needs: toolchain
@@ -63,7 +50,6 @@ jobs:
           - { name: busybox, version: "1.37.0", category: core }
           - { name: zlib, version: "1.3.1", category: core }
           - { name: mbedtls, version: "3.6.5", category: core }
-          - { name: musl, version: "1.2.5", category: core }
           - { name: curl, version: "8.18.0", category: core }
           - { name: e2fsprogs, version: "1.47.3", category: core }
           - { name: ncurses, version: "6.6", category: lib }
@@ -86,7 +72,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential cmake meson ninja-build \
-            bc flex bison libelf-dev
+            bc flex bison libelf-dev zstd
 
       - name: Download toolchain
         uses: actions/download-artifact@v4
@@ -100,21 +86,23 @@ jobs:
       - name: Build ${{ matrix.package.name }}
         run: |
           export PATH="$PWD/toolchain/bin:$PATH"
-          export CROSS=${{ env.TARGET }}
+          export CROSS="${{ env.TARGET }}"
           export SYSROOT="$PWD/toolchain/${{ env.TARGET }}"
           
           PKG_NAME="${{ matrix.package.name }}"
           PKG_VER="${{ matrix.package.version }}"
-          PKG_DIR="pkg-output"
+          PKG_DIR="$PWD/pkg-output"
+          WORK="$PWD/build-work"
           
-          mkdir -p build-work "$PKG_DIR"
+          mkdir -p "$WORK" "$PKG_DIR"
           
-          # Source the Portfile and build
-          cd build-work
-          source "../ports/${{ matrix.package.category }}/${PKG_NAME}/Portfile" 2>/dev/null || true
+          # Source the Portfile
+          PORTFILE="ports/${{ matrix.package.category }}/${PKG_NAME}/Portfile"
+          . "$PORTFILE" 2>/dev/null || true
           
           # Download source
           if [ -n "$source" ]; then
+            cd "$WORK"
             curl -fL -o "$(basename "$source")" "$source"
             case "$(basename "$source")" in
               *.tar.gz|*.tgz) tar xzf "$(basename "$source")" ;;
@@ -124,31 +112,32 @@ jobs:
           fi
           
           # Apply patches
-          PORTDIR="../ports/${{ matrix.package.category }}/${PKG_NAME}"
+          PORTDIR="$GITHUB_WORKSPACE/ports/${{ matrix.package.category }}/${PKG_NAME}"
           if [ -d "$PORTDIR/patches" ]; then
             for p in "$PORTDIR/patches"/*.patch; do
-              [ -f "$p" ] && patch -p1 < "$p"
+              [ -f "$p" ] && patch -d "$WORK" -p1 < "$p"
             done
           fi
           
           # Build
-          export PKG="$PWD/../$PKG_DIR"
-          export SRC="$PWD"
+          export PKG="$PKG_DIR"
+          export SRC="$WORK"
           export MAKEFLAGS="-j$(nproc)"
-          build || echo "Build needs custom handling"
+          cd "$WORK"
+          build || echo "::warning::Build function failed for $PKG_NAME"
           
-          cd ..
+          cd "$GITHUB_WORKSPACE"
           
           # Create tarball
           TARBALL="${PKG_NAME}-${PKG_VER}-${{ env.ARCH }}.tar.gz"
           if [ "$(ls -A "$PKG_DIR" 2>/dev/null)" ]; then
             cd "$PKG_DIR"
-            tar czf "../$TARBALL" .
-            cd ..
+            tar czf "$GITHUB_WORKSPACE/$TARBALL" .
+            cd "$GITHUB_WORKSPACE"
             sha256sum "$TARBALL" > "${TARBALL}.sha256"
-            echo "Built: $TARBALL ($(du -h "$TARBALL" | cut -f1))"
+            echo "✅ Built: $TARBALL ($(du -h "$TARBALL" | cut -f1))"
           else
-            echo "Warning: empty package output for $PKG_NAME"
+            echo "::warning::Empty package output for $PKG_NAME"
           fi
 
       - name: Upload package
@@ -174,115 +163,62 @@ jobs:
 
       - name: Generate repo.json
         run: |
-          echo "[" > repo.json
-          first=true
-          for dir in artifacts/pkg-*/; do
-            for tarball in "$dir"*.tar.gz; do
-              [ -f "$tarball" ] || continue
-              filename=$(basename "$tarball")
-              name=$(echo "$filename" | sed 's/-[0-9].*//')
-              version=$(echo "$filename" | sed "s/${name}-//" | sed 's/-x86_64.tar.gz//')
-              sha256=$(cat "${tarball}.sha256" 2>/dev/null | awk '{print $1}')
-              size=$(du -h "$tarball" | cut -f1)
-              
-              # Get metadata from Portfile
-              category=""
-              desc=""
-              deps=""
-              for cat in core lib devel net extra; do
-                pf="ports/$cat/$name/Portfile"
-                if [ -f "$pf" ]; then
-                  category="$cat"
-                  desc=$(grep "^# Description:" "$pf" | sed 's/# Description: //')
-                  deps=$(grep "^# Depends:" "$pf" | sed 's/# Depends: //')
-                  break
-                fi
-              done
-              
-              if [ "$first" = true ]; then first=false; else echo "," >> repo.json; fi
-              
-              deps_json="[]"
-              if [ -n "$deps" ]; then
-                deps_json=$(echo "$deps" | tr ' ' '\n' | sed 's/.*/"&"/' | tr '\n' ',' | sed 's/,$//' | sed 's/^/[/' | sed 's/$/]/')
-              fi
-              
-              cat >> repo.json <<ENTRY
-            {
-              "name": "$name",
-              "version": "$version",
-              "category": "$category",
-              "description": "$desc",
-              "depends": $deps_json,
-              "size": "$size",
-              "sha256": "$sha256",
-              "filename": "$filename"
-            }
-          ENTRY
-            done
-          done
-          echo "]" >> repo.json
-          
-          echo "Generated repo.json:"
-          cat repo.json | head -30
+          python3 -c "
+          import json, os, glob
+
+          packages = []
+          for d in sorted(glob.glob('artifacts/pkg-*/')):
+              for tarball in glob.glob(os.path.join(d, '*.tar.gz')):
+                  if tarball.endswith('.sha256'):
+                      continue
+                  filename = os.path.basename(tarball)
+                  parts = filename.replace('-x86_64.tar.gz', '').rsplit('-', 1)
+                  name = parts[0]
+                  version = parts[1] if len(parts) > 1 else 'unknown'
+                  
+                  sha_file = tarball + '.sha256'
+                  sha256 = ''
+                  if os.path.exists(sha_file):
+                      sha256 = open(sha_file).read().split()[0]
+                  
+                  size = f'{os.path.getsize(tarball) / 1024 / 1024:.1f}M'
+                  
+                  # Get metadata from Portfile
+                  category = desc = ''
+                  deps = []
+                  for cat in ['core', 'lib', 'devel', 'net', 'extra']:
+                      pf = f'ports/{cat}/{name}/Portfile'
+                      if os.path.exists(pf):
+                          category = cat
+                          for line in open(pf):
+                              if line.startswith('# Description:'):
+                                  desc = line.split(':', 1)[1].strip()
+                              elif line.startswith('# Depends:'):
+                                  deps = line.split(':', 1)[1].strip().split()
+                          break
+                  
+                  packages.append({
+                      'name': name,
+                      'version': version,
+                      'category': category,
+                      'description': desc,
+                      'depends': deps,
+                      'size': size,
+                      'sha256': sha256,
+                      'filename': filename
+                  })
+
+          with open('repo.json', 'w') as f:
+              json.dump(packages, f, indent=2)
+          print(f'Generated repo.json with {len(packages)} packages')
+          "
+          cat repo.json
 
       - name: Upload repo.json
         uses: actions/upload-artifact@v4
         with:
           name: repo-db
           path: repo.json
-
-  iso:
-    needs: packages
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y xorriso cpio gzip bc libelf-dev \
-            build-essential flex bison qemu-system-x86
-
-      - name: Download toolchain
-        uses: actions/download-artifact@v4
-        with:
-          name: toolchain
-          path: toolchain
-
-      - name: Fix toolchain permissions
-        run: chmod -R +x toolchain/bin/
-
-      - name: Build rootfs + ISO
-        run: |
-          export PATH="$PWD/toolchain/bin:$HOME/bin:$PATH"
-          
-          # Build rootfs
-          bash scripts/build-rootfs.sh ./rootfs
-          
-          # Build kernel
-          cd toolchain-build/src/linux-* 2>/dev/null || {
-            mkdir -p build-kernel && cd build-kernel
-            curl -fL "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.12.73.tar.xz" | tar xJ
-            cd linux-6.12.73
-          }
-          make ARCH=x86_64 CROSS_COMPILE=x86_64-scarab-linux-musl- defconfig
-          make ARCH=x86_64 CROSS_COMPILE=x86_64-scarab-linux-musl- -j$(nproc)
-          mkdir -p ../../rootfs/boot
-          cp arch/x86/boot/bzImage ../../rootfs/boot/vmlinuz-6.12.73
-          cd ../..
-          
-          # Install packages from artifacts
-          # (simplified - in real CI we'd extract all package tarballs)
-          
-          # Create ISO with Limine
-          bash scripts/build-iso.sh ./rootfs || echo "ISO build needs Limine setup"
-
-      - name: Upload ISO
-        uses: actions/upload-artifact@v4
-        with:
-          name: scarab-iso
-          path: "*.iso"
-          if-no-files-found: warn
 
   publish:
     needs: [repo-db, packages]
@@ -303,6 +239,7 @@ jobs:
           for dir in artifacts/pkg-*/; do
             cp "$dir"*.tar.gz "$dir"*.sha256 release/ 2>/dev/null || true
           done
+          echo "Release files:"
           ls -lh release/
 
       - name: Publish to packages repo
