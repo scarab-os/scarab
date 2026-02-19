@@ -8,7 +8,8 @@
 
 set -e
 
-PREFIX="${1:-/home/dragon/projects/scarab/toolchain}"
+PREFIX="$(cd "$(dirname "${1:-.}")" && pwd)/$(basename "${1:-toolchain}")"
+PREFIX="${PREFIX:-/opt/scarab-toolchain}"
 TARGET="x86_64-scarab-linux-musl"
 SYSROOT="$PREFIX/$TARGET"
 JOBS="$(nproc)"
