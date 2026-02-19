@@ -1,0 +1,28 @@
+# Description: Distributed version control system
+# URL: https://git-scm.com
+# Depends: curl zlib
+
+name=git
+version=2.53.0
+source=https://github.com/git/git/archive/refs/tags/v$version.tar.gz
+
+build() {
+    cd $name-$version
+
+    make prefix=/usr \
+        NO_OPENSSL=1 \
+        NO_PYTHON=1 \
+        NO_PERL=1 \
+        NO_TCLTK=1 \
+        NO_GETTEXT=1 \
+        CURL_LDFLAGS="-lcurl" \
+        -j$(nproc)
+
+    make prefix=/usr \
+        NO_OPENSSL=1 \
+        NO_PYTHON=1 \
+        NO_PERL=1 \
+        NO_TCLTK=1 \
+        NO_GETTEXT=1 \
+        DESTDIR=$PKG install
+}

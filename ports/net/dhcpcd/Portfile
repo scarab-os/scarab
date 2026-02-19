@@ -1,0 +1,21 @@
+# Description: DHCP client daemon
+# URL: https://github.com/NetworkConfiguration/dhcpcd
+# Depends:
+
+name=dhcpcd
+version=10.3.0
+source=https://github.com/NetworkConfiguration/dhcpcd/releases/download/v$version/dhcpcd-$version.tar.xz
+
+build() {
+    cd $name-$version
+
+    ./configure \
+        --prefix=/usr \
+        --sbindir=/sbin \
+        --sysconfdir=/etc \
+        --libexecdir=/usr/lib/dhcpcd \
+        --runstatedir=/run
+
+    make -j$(nproc)
+    make DESTDIR=$PKG install
+}

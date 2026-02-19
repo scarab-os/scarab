@@ -1,0 +1,21 @@
+# Description: Ext2/3/4 filesystem utilities
+# URL: https://e2fsprogs.sourceforge.net
+# Depends:
+
+name=e2fsprogs
+version=1.47.3
+source=https://github.com/tytso/e2fsprogs/archive/refs/tags/v$version.tar.gz
+
+build() {
+    cd $name-$version
+
+    mkdir build && cd build
+    ../configure \
+        --prefix=/usr \
+        --sbindir=/sbin \
+        --sysconfdir=/etc \
+        --disable-nls
+
+    make -j$(nproc)
+    make DESTDIR=$PKG install
+}

@@ -1,0 +1,460 @@
+#!/bin/sh
+# scarab - Scarab OS package manager
+# Simple ports-based package management
+
+set -e
+
+SCARAB_ROOT="${SCARAB_ROOT:-}"
+SCARAB_PORTS="${SCARAB_PORTS:-/usr/ports}"
+SCARAB_PKG="${SCARAB_PKG:-/var/lib/scarab/pkg}"
+SCARAB_DB="${SCARAB_DB:-/var/lib/scarab/db}"
+SCARAB_CACHE="${SCARAB_CACHE:-/var/cache/scarab/sources}"
+SCARAB_WORK="${SCARAB_WORK:-/var/cache/scarab/work}"
+
+VERSION="0.1.0"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+msg() { printf "${GREEN}==>${NC} ${BOLD}%s${NC}\n" "$*"; }
+msg2() { printf "${BLUE}  ->${NC} %s\n" "$*"; }
+warn() { printf "${YELLOW}==> WARNING:${NC} %s\n" "$*"; }
+err() { printf "${RED}==> ERROR:${NC} %s\n" "$*" >&2; exit 1; }
+
+# Find a port by name across all categories
+find_port() {
+    local name="$1"
+    for dir in "$SCARAB_PORTS"/*/; do
+        if [ -f "$dir$name/Portfile" ]; then
+            echo "$dir$name"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Parse Portfile variables
+parse_portfile() {
+    local portdir="$1"
+    local portfile="$portdir/Portfile"
+    [ -f "$portfile" ] || err "Portfile not found: $portfile"
+
+    # Extract metadata from comments
+    _port_desc=$(sed -n 's/^# Description: *//p' "$portfile")
+    _port_url=$(sed -n 's/^# URL: *//p' "$portfile")
+    _port_deps=$(sed -n 's/^# Depends: *//p' "$portfile")
+
+    # Source the Portfile to get variables
+    name="" version="" source=""
+    . "$portfile"
+}
+
+# Download source
+fetch_source() {
+    local url="$1"
+    local filename=$(basename "$url")
+    local dest="$SCARAB_CACHE/$filename"
+
+    mkdir -p "$SCARAB_CACHE"
+
+    if [ -f "$dest" ]; then
+        msg2 "Source already cached: $filename"
+    else
+        msg2 "Downloading $filename..."
+        if command -v curl >/dev/null 2>&1; then
+            curl -fL -o "$dest" "$url"
+        elif command -v wget >/dev/null 2>&1; then
+            wget -q -O "$dest" "$url"
+        else
+            err "No download tool found (need curl or wget)"
+        fi
+    fi
+    echo "$dest"
+}
+
+# Extract source
+extract_source() {
+    local archive="$1"
+    local workdir="$2"
+
+    mkdir -p "$workdir"
+    msg2 "Extracting $(basename "$archive")..."
+
+    case "$archive" in
+        *.tar.gz|*.tgz)    tar xzf "$archive" -C "$workdir" ;;
+        *.tar.bz2|*.tbz2)  tar xjf "$archive" -C "$workdir" ;;
+        *.tar.xz|*.txz)    tar xJf "$archive" -C "$workdir" ;;
+        *.tar.zst)          tar --zstd -xf "$archive" -C "$workdir" ;;
+        *.tar)              tar xf "$archive" -C "$workdir" ;;
+        *.zip)              unzip -q "$archive" -d "$workdir" ;;
+        *)                  err "Unknown archive format: $archive" ;;
+    esac
+}
+
+# Apply patches if any
+apply_patches() {
+    local portdir="$1"
+    local workdir="$2"
+
+    if [ -d "$portdir/patches" ]; then
+        for patch in "$portdir/patches"/*.patch; do
+            [ -f "$patch" ] || continue
+            msg2 "Applying patch: $(basename "$patch")"
+            patch -d "$workdir" -p1 < "$patch"
+        done
+    fi
+}
+
+# Resolve dependencies recursively
+resolve_deps() {
+    local port="$1"
+    local visited="$2"
+
+    # Avoid cycles
+    case " $visited " in
+        *" $port "*) return ;;
+    esac
+    visited="$visited $port"
+
+    local portdir
+    portdir=$(find_port "$port") || err "Port not found: $port"
+    parse_portfile "$portdir"
+
+    for dep in $_port_deps; do
+        resolve_deps "$dep" "$visited"
+    done
+
+    # Print if not installed
+    if ! is_installed "$port"; then
+        echo "$port"
+    fi
+}
+
+# Check if a port is installed
+is_installed() {
+    [ -f "$SCARAB_DB/$1/installed" ]
+}
+
+# Get installed version
+installed_version() {
+    if [ -f "$SCARAB_DB/$1/version" ]; then
+        cat "$SCARAB_DB/$1/version"
+    fi
+}
+
+# Record installation
+record_install() {
+    local port_name="$1"
+    local port_version="$2"
+    local pkgdir="$3"
+
+    mkdir -p "$SCARAB_DB/$port_name"
+    echo "$port_version" > "$SCARAB_DB/$port_name/version"
+    date '+%Y-%m-%d %H:%M:%S' > "$SCARAB_DB/$port_name/installed"
+
+    # Record file list
+    (cd "$pkgdir" && find . -type f -o -type l | sed 's|^\./||') \
+        > "$SCARAB_DB/$port_name/files"
+}
+
+# === Commands ===
+
+cmd_build() {
+    local port_name="$1"
+    [ -z "$port_name" ] && err "Usage: scarab build <port>"
+
+    local portdir
+    portdir=$(find_port "$port_name") || err "Port not found: $port_name"
+    parse_portfile "$portdir"
+
+    msg "Building $name $version"
+
+    # Setup work directory
+    local workdir="$SCARAB_WORK/$name"
+    local pkgdir="$SCARAB_PKG/$name"
+    rm -rf "$workdir" "$pkgdir"
+    mkdir -p "$workdir" "$pkgdir"
+
+    # Export PKG for the build() function
+    export PKG="$pkgdir"
+    export SRC="$workdir"
+    export MAKEFLAGS="-j$(nproc)"
+
+    # Download & extract
+    if [ -n "$source" ]; then
+        local archive
+        archive=$(fetch_source "$source")
+        extract_source "$archive" "$workdir"
+    fi
+
+    # Apply patches
+    apply_patches "$portdir" "$workdir"
+
+    # Run build
+    cd "$workdir"
+    msg2 "Running build()..."
+    build
+
+    msg "Build complete: $name $version"
+    echo "$pkgdir"
+}
+
+cmd_install() {
+    local port_name="$1"
+    local force=0
+
+    case "$1" in
+        -f|--force) force=1; port_name="$2" ;;
+    esac
+
+    [ -z "$port_name" ] && err "Usage: scarab install [-f] <port>"
+
+    # Check dependencies first
+    msg "Resolving dependencies for $port_name..."
+    local deps
+    deps=$(resolve_deps "$port_name" "")
+
+    if [ -n "$deps" ]; then
+        msg "Dependencies to install:"
+        for dep in $deps; do
+            # Skip the port itself, we handle it last
+            [ "$dep" = "$port_name" ] && continue
+            msg2 "$dep"
+        done
+
+        # Install deps first
+        for dep in $deps; do
+            [ "$dep" = "$port_name" ] && continue
+            cmd_install "$dep"
+        done
+    fi
+
+    if is_installed "$port_name" && [ "$force" -eq 0 ]; then
+        local iv=$(installed_version "$port_name")
+        msg "$port_name $iv is already installed (use -f to force)"
+        return 0
+    fi
+
+    # Build
+    local pkgdir
+    pkgdir=$(cmd_build "$port_name")
+
+    # Install files
+    local portdir
+    portdir=$(find_port "$port_name")
+    parse_portfile "$portdir"
+
+    msg "Installing $name $version..."
+    cp -a "$pkgdir"/* "$SCARAB_ROOT/" 2>/dev/null || true
+
+    # Record
+    record_install "$name" "$version" "$pkgdir"
+
+    # Cleanup work dir
+    rm -rf "$SCARAB_WORK/$name"
+
+    msg "Installed $name $version"
+}
+
+cmd_remove() {
+    local port_name="$1"
+    [ -z "$port_name" ] && err "Usage: scarab remove <port>"
+
+    is_installed "$port_name" || err "$port_name is not installed"
+
+    msg "Removing $port_name..."
+
+    # Remove files
+    if [ -f "$SCARAB_DB/$port_name/files" ]; then
+        while IFS= read -r file; do
+            rm -f "$SCARAB_ROOT/$file"
+        done < "$SCARAB_DB/$port_name/files"
+
+        # Clean empty directories (bottom-up)
+        while IFS= read -r file; do
+            local dir=$(dirname "$SCARAB_ROOT/$file")
+            rmdir "$dir" 2>/dev/null || true
+        done < "$SCARAB_DB/$port_name/files"
+    fi
+
+    # Remove db entry
+    rm -rf "$SCARAB_DB/$port_name"
+
+    msg "Removed $port_name"
+}
+
+cmd_search() {
+    local query="$1"
+    [ -z "$query" ] && err "Usage: scarab search <query>"
+
+    for category in "$SCARAB_PORTS"/*/; do
+        local cat_name=$(basename "$category")
+        for portdir in "$category"*/; do
+            [ -f "$portdir/Portfile" ] || continue
+            local port_name=$(basename "$portdir")
+
+            case "$port_name" in
+                *"$query"*)
+                    parse_portfile "$portdir"
+                    local status="  "
+                    is_installed "$port_name" && status="* "
+                    printf "${GREEN}%s${NC}${BOLD}%s/%s${NC} %s - %s\n" \
+                        "$status" "$cat_name" "$port_name" "$version" "$_port_desc"
+                    ;;
+            esac
+        done
+    done
+}
+
+cmd_list() {
+    if [ ! -d "$SCARAB_DB" ]; then
+        msg "No packages installed"
+        return
+    fi
+
+    for entry in "$SCARAB_DB"/*/; do
+        [ -f "$entry/installed" ] || continue
+        local pkg=$(basename "$entry")
+        local ver=$(cat "$entry/version" 2>/dev/null || echo "?")
+        local date=$(cat "$entry/installed" 2>/dev/null || echo "?")
+        printf "${BOLD}%-20s${NC} %-12s %s\n" "$pkg" "$ver" "$date"
+    done
+}
+
+cmd_depends() {
+    local port_name="$1"
+    [ -z "$port_name" ] && err "Usage: scarab depends <port>"
+
+    local portdir
+    portdir=$(find_port "$port_name") || err "Port not found: $port_name"
+    parse_portfile "$portdir"
+
+    msg "Dependency tree for $name $version:"
+    _print_dep_tree "$port_name" ""
+}
+
+_print_dep_tree() {
+    local port="$1"
+    local indent="$2"
+
+    local portdir
+    portdir=$(find_port "$port") || return
+    parse_portfile "$portdir"
+
+    local status="[not installed]"
+    is_installed "$port" && status="[$(installed_version "$port")]"
+
+    printf "%s%s %s %s\n" "$indent" "$port" "$version" "$status"
+
+    for dep in $_port_deps; do
+        _print_dep_tree "$dep" "  $indent"
+    done
+}
+
+cmd_update() {
+    msg "Checking for updates..."
+
+    for entry in "$SCARAB_DB"/*/; do
+        [ -f "$entry/installed" ] || continue
+        local pkg=$(basename "$entry")
+        local installed_ver=$(cat "$entry/version")
+
+        local portdir
+        portdir=$(find_port "$pkg") || continue
+        parse_portfile "$portdir"
+
+        if [ "$installed_ver" != "$version" ]; then
+            msg2 "$pkg: $installed_ver -> $version"
+            cmd_install -f "$pkg"
+        fi
+    done
+
+    msg "System is up to date"
+}
+
+cmd_sync() {
+    msg "Syncing ports tree..."
+    if [ -d "$SCARAB_PORTS/.git" ]; then
+        cd "$SCARAB_PORTS"
+        git pull --ff-only
+        msg "Ports tree updated"
+    else
+        warn "Ports tree is not a git repo, nothing to sync"
+    fi
+}
+
+cmd_info() {
+    local port_name="$1"
+    [ -z "$port_name" ] && err "Usage: scarab info <port>"
+
+    local portdir
+    portdir=$(find_port "$port_name") || err "Port not found: $port_name"
+    parse_portfile "$portdir"
+
+    local category=$(basename "$(dirname "$portdir")")
+
+    printf "${BOLD}Name:${NC}        %s\n" "$name"
+    printf "${BOLD}Version:${NC}     %s\n" "$version"
+    printf "${BOLD}Category:${NC}    %s\n" "$category"
+    printf "${BOLD}Description:${NC} %s\n" "$_port_desc"
+    printf "${BOLD}URL:${NC}         %s\n" "$_port_url"
+    printf "${BOLD}Depends:${NC}     %s\n" "${_port_deps:-none}"
+
+    if is_installed "$port_name"; then
+        printf "${BOLD}Status:${NC}      ${GREEN}installed${NC} (%s)\n" "$(installed_version "$port_name")"
+    else
+        printf "${BOLD}Status:${NC}      ${YELLOW}not installed${NC}\n"
+    fi
+}
+
+cmd_version() {
+    echo "scarab $VERSION"
+}
+
+cmd_help() {
+    cat <<EOF
+🪲 scarab $VERSION - Scarab OS package manager
+
+Usage: scarab <command> [options]
+
+Commands:
+    sync              Sync/update ports tree
+    build <port>      Build a port (no install)
+    install <port>    Build and install a port
+    remove <port>     Remove an installed port
+    update            Update all installed ports
+    search <query>    Search ports
+    list              List installed ports
+    info <port>       Show port info
+    depends <port>    Show dependency tree
+    help              Show this help
+    version           Show version
+
+Environment:
+    SCARAB_PORTS      Ports directory (default: /usr/ports)
+    SCARAB_ROOT       Install root (default: /)
+    MAKEFLAGS         Make flags (default: -j\$(nproc))
+EOF
+}
+
+# === Main ===
+
+case "${1:-help}" in
+    sync)       cmd_sync ;;
+    build)      shift; cmd_build "$@" ;;
+    install)    shift; cmd_install "$@" ;;
+    remove)     shift; cmd_remove "$@" ;;
+    update)     cmd_update ;;
+    search)     shift; cmd_search "$@" ;;
+    list)       cmd_list ;;
+    info)       shift; cmd_info "$@" ;;
+    depends)    shift; cmd_depends "$@" ;;
+    version|-v) cmd_version ;;
+    help|-h)    cmd_help ;;
+    *)          err "Unknown command: $1 (try 'scarab help')" ;;
+esac

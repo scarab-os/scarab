@@ -1,0 +1,20 @@
+# Description: Package compiler and linker metadata toolkit
+# URL: https://github.com/pkgconf/pkgconf
+# Depends:
+
+name=pkgconf
+version=2.5.1
+source=https://github.com/pkgconf/pkgconf/archive/refs/tags/pkgconf-$version.tar.gz
+
+build() {
+    cd $name-$name-$version
+
+    meson setup build \
+        --prefix=/usr \
+        -Dbuildtype=release
+
+    ninja -C build
+    DESTDIR=$PKG ninja -C build install
+
+    ln -sf pkgconf $PKG/usr/bin/pkg-config
+}

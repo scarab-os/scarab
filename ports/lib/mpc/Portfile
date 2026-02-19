@@ -1,0 +1,18 @@
+# Description: Multiple precision complex arithmetic library
+# URL: https://www.multiprecision.org/mpc/
+# Depends: gmp mpfr
+
+name=mpc
+version=1.3.1
+source=https://ftp.gnu.org/gnu/mpc/mpc-$version.tar.gz
+
+build() {
+    cd $name-$version
+
+    ./configure \
+        --prefix=/usr \
+        --disable-static
+
+    make -j$(nproc)
+    make DESTDIR=$PKG install
+}

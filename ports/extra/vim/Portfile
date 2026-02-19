@@ -1,0 +1,23 @@
+# Description: Vi IMproved text editor
+# URL: https://www.vim.org
+# Depends: ncurses
+
+name=vim
+version=9.2
+source=https://github.com/vim/vim/archive/refs/tags/v$version.0014.tar.gz
+
+build() {
+    cd $name-$version.0014
+
+    ./configure \
+        --prefix=/usr \
+        --with-tlib=ncursesw \
+        --disable-gui \
+        --without-x \
+        --disable-nls
+
+    make -j$(nproc)
+    make DESTDIR=$PKG install
+
+    ln -sf vim $PKG/usr/bin/vi
+}

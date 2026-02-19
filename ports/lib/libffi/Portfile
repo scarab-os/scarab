@@ -1,0 +1,18 @@
+# Description: Foreign function interface library
+# URL: https://sourceware.org/libffi/
+# Depends:
+
+name=libffi
+version=3.5.2
+source=https://github.com/libffi/libffi/releases/download/v$version/libffi-$version.tar.gz
+
+build() {
+    cd $name-$version
+
+    ./configure \
+        --prefix=/usr \
+        --disable-static
+
+    make -j$(nproc)
+    make DESTDIR=$PKG install
+}

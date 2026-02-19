@@ -1,0 +1,17 @@
+# Build artifacts
+rootfs/
+toolchain-build/
+iso-build/
+*.iso
+
+# Caches
+/var/
+
+# Editor
+*.swp
+*~
+toolchain-build/
+toolchain/
+toolchain-build/
+toolchain/
+rootfs-dev-backup/

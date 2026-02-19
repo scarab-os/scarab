@@ -1,0 +1,19 @@
+# Description: Lightweight SSH server and client
+# URL: https://github.com/mkj/dropbear
+# Depends:
+
+name=dropbear
+version=2025.89
+source=https://github.com/mkj/dropbear/releases/download/DROPBEAR_$version/dropbear-$version.tar.bz2
+
+build() {
+    cd $name-$version
+
+    ./configure \
+        --prefix=/usr \
+        --sysconfdir=/etc/dropbear \
+        --disable-zlib
+
+    make PROGRAMS="dropbear dbclient dropbearkey scp" -j$(nproc)
+    make PROGRAMS="dropbear dbclient dropbearkey scp" DESTDIR=$PKG install
+}

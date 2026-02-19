@@ -1,0 +1,30 @@
+# Description: Linux kernel (LTS)
+# URL: https://www.kernel.org
+# Depends:
+
+name=linux
+version=6.12.73
+source=https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-$version.tar.xz
+
+build() {
+    cd $name-$version
+    make mrproper
+
+    # Use default config or custom config if provided
+    if [ -f "$SCARAB_PORTS/core/linux/files/config" ]; then
+        cp "$SCARAB_PORTS/core/linux/files/config" .config
+    else
+        make defconfig
+    fi
+
+    make -j$(nproc)
+    make INSTALL_MOD_PATH=$PKG modules_install
+
+    mkdir -p $PKG/boot
+    cp arch/x86/boot/bzImage $PKG/boot/vmlinuz-$version
+    cp System.map $PKG/boot/System.map-$version
+    cp .config $PKG/boot/config-$version
+
+    # Headers
+    make INSTALL_HDR_PATH=$PKG/usr headers_install
+}

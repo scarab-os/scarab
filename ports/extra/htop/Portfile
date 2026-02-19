@@ -1,0 +1,18 @@
+# Description: Interactive process viewer
+# URL: https://htop.dev
+# Depends: ncurses
+
+name=htop
+version=3.4.1
+source=https://github.com/htop-dev/htop/releases/download/$version/htop-$version.tar.xz
+
+build() {
+    cd $name-$version
+
+    ./configure \
+        --prefix=/usr \
+        --disable-unicode
+
+    make -j$(nproc)
+    make DESTDIR=$PKG install
+}

@@ -1,0 +1,18 @@
+# Description: Lightweight C standard library
+# URL: https://musl.libc.org
+# Depends: linux
+
+name=musl
+version=1.2.5
+source=https://musl.libc.org/releases/musl-$version.tar.gz
+
+build() {
+    cd $name-$version
+
+    ./configure \
+        --prefix=/usr \
+        --syslibdir=/lib
+
+    make -j$(nproc)
+    make DESTDIR=$PKG install
+}

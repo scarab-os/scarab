@@ -1,0 +1,25 @@
+# Description: Swiss army knife of embedded Linux
+# URL: https://busybox.net
+# Depends:
+
+name=busybox
+version=1.37.0
+source=https://busybox.net/downloads/busybox-$version.tar.bz2
+
+build() {
+    cd $name-$version
+
+    if [ -f "$SCARAB_PORTS/core/busybox/files/config" ]; then
+        cp "$SCARAB_PORTS/core/busybox/files/config" .config
+    else
+        make defconfig
+    fi
+
+    # Static build
+    sed -i 's/# CONFIG_STATIC is not set/CONFIG_STATIC=y/' .config
+
+    make -j$(nproc)
+
+    mkdir -p $PKG/bin $PKG/sbin $PKG/usr/bin $PKG/usr/sbin
+    make CONFIG_PREFIX=$PKG install
+}

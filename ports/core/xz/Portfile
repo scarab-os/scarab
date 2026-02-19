@@ -1,0 +1,19 @@
+# Description: XZ compression utilities
+# URL: https://tukaani.org/xz/
+# Depends:
+
+name=xz
+version=5.8.2
+source=https://github.com/tukaani-project/xz/releases/download/v$version/xz-$version.tar.gz
+
+build() {
+    cd $name-$version
+
+    ./configure \
+        --prefix=/usr \
+        --disable-static \
+        --disable-nls
+
+    make -j$(nproc)
+    make DESTDIR=$PKG install
+}

@@ -1,0 +1,15 @@
+# Description: IP routing utilities
+# URL: https://wiki.linuxfoundation.org/networking/iproute2
+# Depends:
+
+name=iproute2
+version=6.18.0
+source=https://git.kernel.org/pub/scm/network/iproute2/iproute2.git/snapshot/iproute2-$version.tar.gz
+
+build() {
+    cd $name-$version
+
+    ./configure --prefix=/usr
+    make -j$(nproc)
+    make DESTDIR=$PKG install
+}

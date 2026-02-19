@@ -1,0 +1,19 @@
+# Description: Multiple-precision floating-point library
+# URL: https://www.mpfr.org
+# Depends: gmp
+
+name=mpfr
+version=4.2.2
+source=https://ftp.gnu.org/gnu/mpfr/mpfr-$version.tar.xz
+
+build() {
+    cd $name-$version
+
+    ./configure \
+        --prefix=/usr \
+        --disable-static \
+        --with-gmp=/usr
+
+    make -j$(nproc)
+    make DESTDIR=$PKG install
+}

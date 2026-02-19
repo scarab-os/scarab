@@ -1,0 +1,18 @@
+# Description: GNU make build tool
+# URL: https://www.gnu.org/software/make/
+# Depends:
+
+name=make
+version=4.4.1
+source=https://ftp.gnu.org/gnu/make/make-$version.tar.gz
+
+build() {
+    cd $name-$version
+
+    ./configure \
+        --prefix=/usr \
+        --disable-nls
+
+    make -j$(nproc)
+    make DESTDIR=$PKG install
+}

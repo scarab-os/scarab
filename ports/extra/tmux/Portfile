@@ -1,0 +1,17 @@
+# Description: Terminal multiplexer
+# URL: https://github.com/tmux/tmux
+# Depends: ncurses libevent
+
+name=tmux
+version=3.6a
+source=https://github.com/tmux/tmux/releases/download/$version/tmux-$version.tar.gz
+
+build() {
+    cd $name-$version
+
+    ./configure \
+        --prefix=/usr
+
+    make -j$(nproc)
+    make DESTDIR=$PKG install
+}

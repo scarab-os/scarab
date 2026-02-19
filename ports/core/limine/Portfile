@@ -1,0 +1,19 @@
+# Description: Modern multiprotocol bootloader
+# URL: https://limine-bootloader.org
+# Depends:
+
+name=limine
+version=10.7.0
+source=https://github.com/limine-bootloader/limine/releases/download/v$version/limine-$version.tar.xz
+
+build() {
+    cd $name-$version
+
+    ./configure \
+        --prefix=/usr \
+        --enable-uefi-x86-64 \
+        --enable-bios
+
+    make -j$(nproc)
+    make DESTDIR=$PKG install
+}

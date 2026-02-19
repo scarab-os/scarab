@@ -1,0 +1,19 @@
+# Description: Simple text editor
+# URL: https://www.nano-editor.org
+# Depends: ncurses
+
+name=nano
+version=8.7
+source=https://www.nano-editor.org/dist/v8/nano-$version.tar.xz
+
+build() {
+    cd $name-$version
+
+    ./configure \
+        --prefix=/usr \
+        --sysconfdir=/etc \
+        --disable-nls
+
+    make -j$(nproc)
+    make DESTDIR=$PKG install
+}

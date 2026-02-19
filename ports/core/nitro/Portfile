@@ -1,0 +1,14 @@
+# Description: Minimal init system
+# URL: https://git.vuxu.org/nitro
+# Depends:
+
+name=nitro
+version=git
+source=https://git.vuxu.org/nitro/snapshot/nitro-master.tar.gz
+
+build() {
+    cd $name-master
+
+    make -j$(nproc)
+    make DESTDIR=$PKG PREFIX=/usr install
+}

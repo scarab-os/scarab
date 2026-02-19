@@ -1,0 +1,21 @@
+# Description: Network file retriever
+# URL: https://www.gnu.org/software/wget/
+# Depends: mbedtls
+
+name=wget
+version=1.25.0
+source=https://ftp.gnu.org/gnu/wget/wget-$version.tar.gz
+
+build() {
+    cd $name-$version
+
+    ./configure \
+        --prefix=/usr \
+        --with-ssl=openssl \
+        --disable-nls \
+        --without-openssl \
+        --with-metalink=no
+
+    make -j$(nproc)
+    make DESTDIR=$PKG install
+}

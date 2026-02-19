@@ -1,0 +1,18 @@
+# Description: Small build system with focus on speed
+# URL: https://ninja-build.org
+# Depends:
+
+name=ninja
+version=1.13.2
+source=https://github.com/ninja-build/ninja/archive/refs/tags/v$version.tar.gz
+
+build() {
+    cd $name-$version
+
+    cmake -B build \
+        -DCMAKE_INSTALL_PREFIX=/usr \
+        -DCMAKE_BUILD_TYPE=Release
+
+    cmake --build build -j$(nproc)
+    DESTDIR=$PKG cmake --install build
+}

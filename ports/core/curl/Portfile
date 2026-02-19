@@ -1,0 +1,22 @@
+# Description: URL transfer tool and library
+# URL: https://curl.se
+# Depends: mbedtls zlib
+
+name=curl
+version=8.18.0
+source=https://curl.se/download/curl-$version.tar.xz
+
+build() {
+    cd $name-$version
+
+    ./configure \
+        --prefix=/usr \
+        --with-mbedtls \
+        --without-ssl \
+        --disable-static \
+        --enable-threaded-resolver \
+        --disable-ldap
+
+    make -j$(nproc)
+    make DESTDIR=$PKG install
+}
